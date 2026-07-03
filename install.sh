@@ -517,6 +517,13 @@ hide_window_decorations yes
 confirm_os_window_close 0
 map ctrl+insert copy_to_clipboard
 map shift+insert paste_from_clipboard
+map ctrl+left neighboring_window left
+map ctrl+right neighboring_window right
+map ctrl+up neighboring_window up
+map ctrl+down neighboring_window down
+map ctrl+shift+z toggle_layout stack
+map ctrl+shift+enter new_window_with_cwd
+map ctrl+shift+t new_tab_with_cwd
 allow_remote_control yes
 cursor_shape block
 cursor_blink_interval 0

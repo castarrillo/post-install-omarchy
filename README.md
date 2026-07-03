@@ -43,6 +43,7 @@ The Plymouth step requires sudo and should be run in a real terminal.
 - Configures Waybar font/icon sizing, workspace layout and tray.
 - Configures Hyprland monitor layout and independent per-monitor workspace ranges.
 - Configures Alacritty, Kitty, Ghostty and Foot with JetBrainsMono Nerd Font at size 12.
+- Adds Kitty window/tab shortcuts from `auto-bspwm`: `Ctrl+Shift+Enter`, `Ctrl+Shift+T`, `Ctrl+Shift+Z`, and `Ctrl+Arrow`.
 
 ## Safety
 
