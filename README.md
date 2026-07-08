@@ -2,7 +2,7 @@
 
 Automation for rebuilding my Omarchy desktop after a fresh install.
 
-It applies the same core customization used on my current machine: Omarchy Kali Linux theme, Zsh + Oh My Zsh + Powerlevel10k, dynamic shell colors from Omarchy themes, Fastfetch, tmux, Waybar sizing, terminal configs, Hyprland monitor/workspace setup, and theme hooks.
+It applies the same core customization used on my current machine: Omarchy Kali Linux theme, Zsh + Oh My Zsh + Powerlevel10k, dynamic shell colors from Omarchy themes, Fastfetch, tmux, Waybar sizing, terminal configs, Hyprland monitor/workspace setup, app overrides, btop GPU monitoring, and theme hooks.
 
 ## Install
 
@@ -41,9 +41,15 @@ The Plymouth step requires sudo and should be run in a real terminal.
 - Configures Fastfetch with hardware/software sections and shell info below terminal info.
 - Configures tmux with `C-Space` and `C-b` prefixes plus Kali theme sourcing.
 - Configures Waybar font/icon sizing, workspace layout and tray.
-- Configures Hyprland monitor layout and independent per-monitor workspace ranges.
+- Configures Hyprland monitor layout, media controls and independent per-monitor workspace ranges.
+- Generates Waybar `persistent-workspaces` dynamically from the current monitor topology.
+- Watches monitor hotplug events and reassigns/recalls workspaces after connect/disconnect.
 - Configures Alacritty, Kitty, Ghostty and Foot with JetBrainsMono Nerd Font at size 12.
+- Applies the Kali unlock logo plus blurred unlock background for Plymouth and SDDM when using `--with-plymouth`.
 - Adds Kitty window/tab shortcuts from `auto-bspwm`: `Ctrl+Shift+Enter`, `Ctrl+Shift+T`, `Ctrl+Shift+Z`, and `Ctrl+Arrow`.
+- Configures btop to show AMD GPU info through `rocm-smi-lib` when available.
+- Adds an Audacity desktop override to avoid oversized GTK scaling under `GDK_SCALE=2`.
+- Sets VSCode terminal minimum contrast ratio to `1` when a VSCode user settings file already exists.
 
 ## Safety
 

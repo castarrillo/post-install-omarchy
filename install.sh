@@ -64,9 +64,9 @@ install_packages() {
     zsh git curl jq tmux fastfetch fzf eza bat zoxide mise
     alacritty kitty ghostty foot
     zsh-syntax-highlighting
-    btop cava zellij nautilus pamixer xclip
+    btop rocm-smi-lib cava zellij nautilus pamixer xclip socat
     docker docker-compose lazydocker
-    signal-desktop obsidian spotify-launcher typora 1password cliamp
+    signal-desktop obsidian spotify-launcher typora 1password cliamp audacity
   )
 
   log "Installing packages"
@@ -477,6 +477,31 @@ omarchy-wallpaper-auto-change
 EOF
 }
 
+apply_unlock_background() {
+  local theme_dir="$HOME/.config/omarchy/themes/$THEME_NAME"
+  local background="$theme_dir/unlock-background.png"
+
+  [[ -f "$background" ]] || return 0
+
+  log "Applying custom unlock background"
+  sudo cp "$background" /usr/share/plymouth/themes/omarchy/background.png
+  sudo cp "$background" /usr/share/sddm/themes/omarchy/background.png
+
+  if ! sudo grep -q 'background.image = Image("background.png")' /usr/share/plymouth/themes/omarchy/omarchy.script; then
+    sudo perl -0pi -e 's~(Window\.SetBackgroundBottomColor\([^\n]+\);\n)~$1\nbackground.image = Image("background.png");\nbackground.image = background.image.Scale(Window.GetWidth(), Window.GetHeight());\nbackground.sprite = Sprite(background.image);\nbackground.sprite.SetPosition(0, 0, -100);\n~' /usr/share/plymouth/themes/omarchy/omarchy.script
+  fi
+
+  if ! sudo grep -q 'source: "background.png"' /usr/share/sddm/themes/omarchy/Main.qml; then
+    sudo perl -0pi -e 's~(  color: "[^"]+"\n)~$1\n  Image {\n    anchors.fill: parent\n    source: "background.png"\n    fillMode: Image.PreserveAspectCrop\n    smooth: true\n  }\n\n  Rectangle {\n    anchors.fill: parent\n    color: "#141C21"\n    opacity: 0.28\n  }\n~' /usr/share/sddm/themes/omarchy/Main.qml
+  fi
+
+  if command -v limine-mkinitcpio >/dev/null 2>&1; then
+    sudo limine-mkinitcpio
+  else
+    sudo mkinitcpio -P
+  fi
+}
+
 install_terminals() {
   log "Installing terminal configs"
   write_file "$HOME/.config/alacritty/alacritty.toml" <<'EOF'
@@ -849,6 +874,10 @@ EOF
 
   write_file "$HOME/.config/hypr/scripts/workspace.sh" 0755 <<'EOF'
 #!/bin/bash
+# Per-monitor independent workspaces with SUPER+[1-0]
+# Dynamically assigns 10 workspaces per monitor based on connection order
+# Usage: workspace.sh switch|move|move-silent <1-10>
+
 ACTION=$1
 BASE=$2
 if [[ -z $ACTION ]] || [[ -z $BASE ]]; then
@@ -863,11 +892,172 @@ OFFSET=$((MONITOR_INDEX * 10))
 WORKSPACE=$((BASE + OFFSET))
 
 case $ACTION in
-  switch) hyprctl dispatch focusworkspaceoncurrentmonitor "$WORKSPACE" ;;
+  switch)
+    # focusworkspaceoncurrentmonitor always shows the workspace on this monitor.
+    hyprctl dispatch focusworkspaceoncurrentmonitor "$WORKSPACE" ;;
   move) hyprctl dispatch movetoworkspace "$WORKSPACE" ;;
   move-silent) hyprctl dispatch movetoworkspacesilent "$WORKSPACE" ;;
-  *) echo "Unknown action: $ACTION" >&2; exit 1 ;;
 esac
+EOF
+
+  write_file "$HOME/.config/hypr/scripts/waybar-gen-config.sh" 0755 <<'EOF'
+#!/bin/bash
+# Generate Waybar workspace config for the current monitor topology.
+# Updates format-icons and persistent-workspaces in config.jsonc.
+# Does NOT restart Waybar; call omarchy restart waybar separately.
+
+CONFIG="$HOME/.config/waybar/config.jsonc"
+MONITORS=$(hyprctl monitors -j | jq 'sort_by(.id)')
+COUNT=$(jq 'length' <<<"$MONITORS")
+
+(( COUNT == 0 )) && exit 0
+
+ICONS=$(jq -n '{ default: "", active: "󱓻" }')
+PERSISTENT=$(jq -n '{}')
+
+for (( i = 0; i < COUNT; i++ )); do
+  monitor_name=$(jq -r ".[$i].name" <<<"$MONITORS")
+
+  for (( base = 1; base <= 10; base++ )); do
+    workspace=$(( i * 10 + base ))
+    icon=$base
+    (( base == 10 )) && icon=0
+
+    ICONS=$(jq --arg ws "$workspace" --arg icon "$icon" \
+      '. + { ($ws): $icon }' <<<"$ICONS")
+    PERSISTENT=$(jq --arg mon "$monitor_name" --argjson ws "$workspace" \
+      '.[$mon] += [$ws]' <<<"$PERSISTENT")
+  done
+done
+
+TMP=$(mktemp)
+jq \
+  --argjson icons "$ICONS" \
+  --argjson persistent "$PERSISTENT" \
+  '.["hyprland/workspaces"]["all-outputs"] = false |
+   .["hyprland/workspaces"]["format-icons"] = $icons |
+   .["hyprland/workspaces"]["persistent-workspaces"] = $persistent' \
+  "$CONFIG" >"$TMP" && mv "$TMP" "$CONFIG"
+EOF
+
+  write_file "$HOME/.config/hypr/scripts/waybar-workspaces.sh" 0755 <<'EOF'
+#!/bin/bash
+# Generate Waybar workspace config and restart Waybar.
+# Called on monitor topology changes and after workspace init.
+
+SCRIPTS="$(dirname "$0")"
+bash "$SCRIPTS/waybar-gen-config.sh"
+omarchy restart waybar
+EOF
+
+  write_file "$HOME/.config/hypr/scripts/workspace-assign.sh" 0755 <<'EOF'
+#!/bin/bash
+# Assign workspaces to monitors based on sorted monitor ID order.
+# Monitor at index i -> workspaces (i*10+1)..(i*10+10), shown on (i*10+1).
+#
+# --migrate-boot-orphans: also move windows from Hyprland's default sequential
+#   workspaces to the correct workspace.
+
+MIGRATE=false
+[[ "$1" == "--migrate-boot-orphans" ]] && MIGRATE=true
+
+MONITORS=$(hyprctl monitors -j | jq 'sort_by(.id)')
+COUNT=$(echo "$MONITORS" | jq 'length')
+(( COUNT == 0 )) && exit 0
+
+if [[ $MIGRATE == true ]]; then
+  for ((i = 0; i < COUNT; i++)); do
+    MON_NAME=$(echo "$MONITORS" | jq -r ".[$i].name")
+    CORRECT_WS=$((i * 10 + 1))
+
+    while read -r orphan_id; do
+      [[ -z "$orphan_id" ]] && continue
+      while read -r addr; do
+        [[ -z "$addr" ]] && continue
+        hyprctl dispatch movetoworkspace "${CORRECT_WS},address:${addr}" >/dev/null 2>&1
+      done < <(hyprctl clients -j | jq -r \
+        --argjson ws "$orphan_id" \
+        '.[] | select(.workspace.id == $ws) | .address')
+    done < <(hyprctl workspaces -j | jq -r \
+      --argjson count "$COUNT" \
+      --arg mon "$MON_NAME" \
+      --argjson correct "$CORRECT_WS" \
+      '.[] | select(.monitor == $mon and .id <= $count and .id != $correct) | .id')
+  done
+fi
+
+for ((i = 0; i < COUNT; i++)); do
+  NAME=$(echo "$MONITORS" | jq -r ".[$i].name")
+  WS=$((i * 10 + 1))
+  hyprctl dispatch moveworkspacetomonitor "$WS" "$NAME"
+done
+
+PRIMARY_NAME=$(echo "$MONITORS" | jq -r '.[0].name')
+for (( ws = 2; ws <= COUNT; ws++ )); do
+  hyprctl dispatch moveworkspacetomonitor "$ws" "$PRIMARY_NAME" 2>/dev/null
+done
+
+for ((i = 0; i < COUNT; i++)); do
+  NAME=$(echo "$MONITORS" | jq -r ".[$i].name")
+  WS=$((i * 10 + 1))
+  hyprctl dispatch focusmonitor "$NAME"
+  hyprctl dispatch focusworkspaceoncurrentmonitor "$WS"
+done
+
+hyprctl dispatch focusmonitor "$(echo "$MONITORS" | jq -r '.[0].name')"
+EOF
+
+  write_file "$HOME/.config/hypr/scripts/workspace-init.sh" 0755 <<'EOF'
+#!/bin/bash
+# Startup initialization: generate Waybar, migrate/assign workspaces, restart Waybar.
+
+sleep 2
+
+SCRIPTS="$(dirname "$0")"
+
+bash "$SCRIPTS/waybar-gen-config.sh"
+bash "$SCRIPTS/workspace-assign.sh" --migrate-boot-orphans
+omarchy restart waybar
+EOF
+
+  write_file "$HOME/.config/hypr/scripts/workspace-monitor-watch.sh" 0755 <<'EOF'
+#!/bin/bash
+# Watch for monitor topology changes and react accordingly.
+# workspace-init.sh handles the boot sequence.
+
+SCRIPTS="$(dirname "$0")"
+SOCKET="$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock"
+LOG="$HOME/.cache/hypr-workspace-events.log"
+
+log() { echo "[$(date '+%T')] $*" >> "$LOG"; }
+
+[[ ! -S $SOCKET ]] && exit 0
+
+log "=== workspace-monitor-watch started (PID $$) ==="
+
+socat -U - UNIX-CONNECT:"$SOCKET" | while read -r event; do
+  case $event in
+    monitoradded*)
+      log "EVENT monitoradded: $event"
+      sleep 1
+      hyprctl reload
+      sleep 0.5
+      bash "$SCRIPTS/waybar-workspaces.sh"
+      bash "$SCRIPTS/workspace-assign.sh" --migrate-boot-orphans
+      log "monitoradded: done"
+      ;;
+    monitorremoved*)
+      log "EVENT monitorremoved: $event"
+      log "clients at removal: $(hyprctl clients -j | jq -c '[.[] | {ws:.workspace.id, title:.title}]')"
+      sleep 2
+      log "clients after sleep: $(hyprctl clients -j | jq -c '[.[] | {ws:.workspace.id, title:.title}]')"
+      bash "$SCRIPTS/workspace-recall.sh"
+      bash "$SCRIPTS/waybar-workspaces.sh"
+      bash "$SCRIPTS/workspace-assign.sh"
+      log "monitorremoved: done"
+      ;;
+  esac
+done
 EOF
 
   write_file "$HOME/.config/hypr/scripts/workspace-recall.sh" 0755 <<'EOF'
@@ -921,8 +1111,17 @@ bindd = SUPER SHIFT CTRL, G, Google Messages, exec, omarchy-launch-or-focus-weba
 bindd = SUPER SHIFT, P, Google Photos, exec, omarchy-launch-or-focus-webapp "Google Photos" "https://photos.google.com/"
 bindd = SUPER SHIFT, X, X, exec, omarchy-launch-webapp "https://x.com/"
 bindd = SUPER SHIFT ALT, X, X Post, exec, omarchy-launch-webapp "https://x.com/compose/post"
+
+# Monitor management
 bindd = SUPER SHIFT, R, Recall windows from external monitors, exec, bash ~/.config/hypr/scripts/workspace-recall.sh
+
+# Wallpaper
 bindd = SUPER SHIFT ALT, W, Force wallpaper change, exec, omarchy-wallpaper-auto-change && notify-send -u low "󰸉  Nuevo fondo" "El timer sigue en :00 :10 :20..." -t 2500
+
+# Media controls
+bindeld = SUPER CTRL, UP, Volume up, exec, omarchy-swayosd-client --output-volume raise
+bindeld = SUPER CTRL, DOWN, Volume down, exec, omarchy-swayosd-client --output-volume lower
+bindld = SUPER CTRL, P, Play/Pause, exec, omarchy-swayosd-client --playerctl play-pause
 
 # Per-monitor independent workspaces.
 unbind = SUPER, code:10
@@ -987,12 +1186,79 @@ bindd = SUPER SHIFT ALT, code:17, Move window silently to workspace 8, exec, ~/.
 bindd = SUPER SHIFT ALT, code:18, Move window silently to workspace 9, exec, ~/.config/hypr/scripts/workspace.sh move-silent 9
 bindd = SUPER SHIFT ALT, code:19, Move window silently to workspace 10, exec, ~/.config/hypr/scripts/workspace.sh move-silent 10
 EOF
+
+  write_file "$HOME/.config/hypr/autostart.conf" <<'EOF'
+# Extra autostart processes
+# exec-once = uwsm-app -- my-service
+exec-once = ~/.config/hypr/scripts/workspace-monitor-watch.sh
+exec-once = ~/.config/hypr/scripts/workspace-init.sh
+EOF
+}
+
+configure_monitoring() {
+  log "Configuring btop GPU monitoring"
+  mkdir -p "$HOME/.config/btop"
+  backup_path "$HOME/.config/btop/btop.conf"
+  touch "$HOME/.config/btop/btop.conf"
+
+  if grep -q '^shown_boxes = ' "$HOME/.config/btop/btop.conf"; then
+    perl -0pi -e 's/^shown_boxes = .*/shown_boxes = "cpu mem net proc gpu0"/m' "$HOME/.config/btop/btop.conf"
+  else
+    printf '\nshown_boxes = "cpu mem net proc gpu0"\n' >> "$HOME/.config/btop/btop.conf"
+  fi
+
+  if grep -q '^show_gpu_info = ' "$HOME/.config/btop/btop.conf"; then
+    perl -0pi -e 's/^show_gpu_info = .*/show_gpu_info = "On"/m' "$HOME/.config/btop/btop.conf"
+  else
+    printf 'show_gpu_info = "On"\n' >> "$HOME/.config/btop/btop.conf"
+  fi
+
+  if [[ -d /opt/rocm/lib ]]; then
+    if sudo -n true >/dev/null 2>&1; then
+      printf '/opt/rocm/lib\n' | sudo tee /etc/ld.so.conf.d/rocm-smi.conf >/dev/null
+      sudo ldconfig
+    else
+      warn "ROCm detected; run with sudo available to configure /etc/ld.so.conf.d/rocm-smi.conf"
+    fi
+  fi
+}
+
+install_app_overrides() {
+  log "Installing app-specific overrides"
+
+  write_file "$HOME/.local/share/applications/audacity.desktop" <<'EOF'
+[Desktop Entry]
+Name=Audacity
+GenericName=Sound Editor
+GenericName[es]=Editor de audio
+Comment=Record and edit audio files
+Comment[es]=Grabar y editar archivos de audio
+Icon=audacity
+StartupWMClass=Audacity
+Type=Application
+Categories=AudioVideo;Audio;AudioVideoEditing;
+Keywords=sound;music editing;voice channel;frequency;modulation;audio trim;clipping;noise reduction;multi track audio editor;edit;mixing;WAV;AIFF;FLAC;MP2;MP3;
+Exec=env GDK_SCALE=1 GDK_DPI_SCALE=1 GDK_BACKEND=x11 UBUNTU_MENUPROXY=0 audacity %F
+StartupNotify=false
+Terminal=false
+MimeType=application/x-audacity-project;application/x-audacity-project+sqlite3;audio/basic;audio/x-aiff;audio/x-wav;audio/aac;audio/ac3;audio/mp4;audio/x-ms-wma;video/mpeg;audio/flac;audio/x-flac;audio/mpeg;application/ogg;audio/x-vorbis+ogg;
+EOF
+
+  if [[ -f "$HOME/.config/Code/User/settings.json" ]]; then
+    backup_path "$HOME/.config/Code/User/settings.json"
+    if grep -q '"terminal.integrated.minimumContrastRatio"' "$HOME/.config/Code/User/settings.json"; then
+      perl -0pi -e 's/"terminal\.integrated\.minimumContrastRatio"\s*:\s*[^,}\n]+/"terminal.integrated.minimumContrastRatio": 1/' "$HOME/.config/Code/User/settings.json"
+    else
+      perl -0pi -e 's/\{/{\n    "terminal.integrated.minimumContrastRatio": 1,/s' "$HOME/.config/Code/User/settings.json"
+    fi
+  fi
 }
 
 apply_theme_and_services() {
   log "Applying theme and restarting user services"
   if command -v omarchy >/dev/null 2>&1; then
     omarchy theme set "$THEME_DISPLAY" || warn "Could not apply theme"
+    [[ -x "$HOME/.config/hypr/scripts/waybar-gen-config.sh" ]] && "$HOME/.config/hypr/scripts/waybar-gen-config.sh" || true
     omarchy restart waybar || true
     omarchy restart terminal || true
   fi
@@ -1010,6 +1276,7 @@ apply_theme_and_services() {
 
   if [[ "$APPLY_PLYMOUTH" == 1 ]] && command -v omarchy >/dev/null 2>&1; then
     omarchy plymouth set-by-theme "$THEME_NAME"
+    apply_unlock_background
   fi
 }
 
@@ -1031,6 +1298,8 @@ main() {
   install_tmux
   install_waybar
   install_hyprland
+  configure_monitoring
+  install_app_overrides
   apply_theme_and_services
   set_default_shell
   log "Done. Backups stored in $BACKUP_ROOT"
