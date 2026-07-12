@@ -178,27 +178,13 @@ if [[ -f /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.
   source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 fi
 
-# Omarchy-style aliases.
-if command -v eza >/dev/null 2>&1; then
-  alias ls='eza -lh --group-directories-first --icons=auto'
-  alias lsa='ls -a'
-  alias lt='eza --tree --level=2 --long --icons --git'
-  alias lta='lt -a'
-fi
-
-if command -v bat >/dev/null 2>&1; then
-  alias cat='bat --paging=never'
-fi
+# Omarchy defaults shared with Bash: cx, n, c, t, git helpers, tdl layouts, eza, fzf, etc.
+[[ -f "$OMARCHY_PATH/default/bash/aliases" ]] && source "$OMARCHY_PATH/default/bash/aliases"
+unalias ga gd 2>/dev/null || true
+[[ -f "$OMARCHY_PATH/default/bash/functions" ]] && source "$OMARCHY_PATH/default/bash/functions"
 
 alias catn='/usr/bin/cat'
 alias grep='grep --color=auto'
-alias ..='cd ..'
-alias ...='cd ../..'
-alias ....='cd ../../..'
-alias c='opencode'
-alias g='git'
-alias gcm='git commit -m'
-alias gcam='git commit -a -m'
 
 mkcd() {
   mkdir -p "$1" && cd "$1"
