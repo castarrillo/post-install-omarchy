@@ -503,7 +503,7 @@ osc52 = "CopyPaste"
 normal = { family = "JetBrainsMono Nerd Font" }
 bold = { family = "JetBrainsMono Nerd Font" }
 italic = { family = "JetBrainsMono Nerd Font" }
-size = 12
+size = 9
 
 [window]
 padding.x = 14
@@ -522,7 +522,7 @@ EOF
 include ~/.config/omarchy/current/theme/kitty.conf
 font_family JetBrainsMono Nerd Font
 bold_italic_font auto
-font_size 12.0
+font_size 9.0
 window_padding_width 14
 hide_window_decorations yes
 confirm_os_window_close 0
@@ -550,7 +550,7 @@ EOF
 config-file = ?"~/.config/omarchy/current/theme/ghostty.conf"
 font-family = "JetBrainsMono Nerd Font"
 font-style = Regular
-font-size = 12
+font-size = 9
 window-theme = ghostty
 window-padding-x = 14
 window-padding-y = 14
@@ -574,7 +574,7 @@ EOF
 [main]
 include=~/.config/omarchy/current/theme/foot.ini
 term=xterm-256color
-font=JetBrainsMono Nerd Font:size=12
+font=JetBrainsMono Nerd Font:size=9
 pad=14x14
 initial-window-mode=windowed
 workers=0
@@ -752,51 +752,51 @@ install_waybar() {
   border-radius: 0;
   min-height: 0;
   font-family: 'JetBrainsMono Nerd Font';
-  font-size: 18px;
+  font-size: 12px;
 }
 
-.modules-left { margin-left: 11px; }
-.modules-right { margin-right: 11px; }
+.modules-left { margin-left: 8px; }
+.modules-right { margin-right: 8px; }
 
 #workspaces button {
   all: initial;
-  padding: 0 8px;
-  margin: 0 2px;
-  min-width: 12px;
+  padding: 0 6px;
+  margin: 0 1.5px;
+  min-width: 9px;
 }
 
 #workspaces button.empty { opacity: 0.5; }
 
 #cpu, #battery, #pulseaudio, #custom-omarchy, #custom-update {
-  min-width: 16px;
-  margin: 0 10px;
+  min-width: 12px;
+  margin: 0 7.5px;
 }
 
-#tray { margin-right: 21px; }
-#bluetooth { margin-right: 23px; }
-#network { margin-right: 17px; }
-#custom-expand-icon { margin-right: 24px; }
-tooltip { padding: 3px; }
-#custom-update { font-size: 12px; }
-#clock { margin-left: 12px; }
-#custom-weather { margin-left: 10px; margin-right: 10px; }
+#tray { margin-right: 16px; }
+#bluetooth { margin-right: 17px; }
+#network { margin-right: 13px; }
+#custom-expand-icon { margin-right: 18px; }
+tooltip { padding: 2px; }
+#custom-update { font-size: 10px; }
+#clock { margin-left: 8.75px; }
+#custom-weather { margin-left: 7.5px; margin-right: 7.5px; }
 #custom-weather.unavailable { min-width: 0; margin: 0; padding: 0; }
 .hidden { opacity: 0; }
 
 #custom-screenrecording-indicator,
 #custom-idle-indicator,
 #custom-notification-silencing-indicator {
-  min-width: 16px;
-  margin-left: 7px;
+  min-width: 12px;
+  margin-left: 5px;
   margin-right: 0;
-  font-size: 12px;
+  font-size: 10px;
   padding-bottom: 1px;
 }
 
 #custom-screenrecording-indicator.active,
 #custom-idle-indicator.active,
 #custom-notification-silencing-indicator.active { color: #a55555; }
-#custom-voxtype { min-width: 16px; margin: 0 0 0 10px; }
+#custom-voxtype { min-width: 12px; margin: 0 0 0 7.5px; }
 #custom-voxtype.recording { color: #a55555; }
 EOF
 
@@ -806,7 +806,7 @@ EOF
   "layer": "top",
   "position": "top",
   "spacing": 0,
-  "height": 35,
+  "height": 26,
   "modules-left": ["custom/omarchy", "hyprland/workspaces"],
   "modules-center": ["clock", "custom/weather", "custom/update", "custom/voxtype", "custom/screenrecording-indicator", "custom/idle-indicator", "custom/notification-silencing-indicator"],
   "modules-right": ["group/tray-expander", "bluetooth", "network", "pulseaudio", "cpu", "battery"],
@@ -832,7 +832,7 @@ EOF
   "custom/idle-indicator": { "on-click": "omarchy-toggle-idle", "exec": "$OMARCHY_PATH/default/waybar/indicators/idle.sh", "signal": 9, "return-type": "json" },
   "custom/notification-silencing-indicator": { "on-click": "omarchy-toggle-notification-silencing", "exec": "$OMARCHY_PATH/default/waybar/indicators/notification-silencing.sh", "signal": 10, "return-type": "json" },
   "custom/voxtype": { "exec": "omarchy-voxtype-status", "return-type": "json", "format": "{icon}", "format-icons": { "idle": "", "recording": "󰍬", "transcribing": "󰔟" }, "tooltip": true, "on-click-right": "omarchy-voxtype-config", "on-click": "omarchy-voxtype-model" },
-  "tray": { "icon-size": 18, "spacing": 23 }
+  "tray": { "icon-size": 12, "spacing": 17 }
 }
 EOF
 }
@@ -893,6 +893,11 @@ EOF
 # Does NOT restart Waybar; call omarchy restart waybar separately.
 
 CONFIG="$HOME/.config/waybar/config.jsonc"
+if [[ ! -s "$CONFIG" ]] || ! jq empty "$CONFIG" 2>/dev/null; then
+  echo "Invalid or empty Waybar config: $CONFIG" >&2
+  exit 1
+fi
+
 MONITORS=$(hyprctl monitors -j | jq 'sort_by(.id)')
 COUNT=$(jq 'length' <<<"$MONITORS")
 
